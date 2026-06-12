@@ -1,0 +1,6 @@
+{
+  "name": "Viora",
+  "description": "Viora is a premium dark-themed dating application designed for finding real connections through elegant design, interactive messaging, profiles, and post discoverability.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
