@@ -15,7 +15,7 @@ import androidx.room.TypeConverters
         CommentEntity::class,
         OfflineSyncQueueEntity::class
     ],
-    version = 8,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
