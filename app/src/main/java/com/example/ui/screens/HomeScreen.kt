@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
+import com.example.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,6 +68,7 @@ fun HomeScreen(
     var feedFilter by remember { mutableStateOf("For You") } // "For You", "Following", "Liked You"
     var videoRatioFilter by remember { mutableStateOf("All") } // "All", "9:16", "16:9", "1:1"
     var searchQuery by remember { mutableStateOf("") }
+    var selectedProfileForDetail by remember { mutableStateOf<DatingProfileEntity?>(null) }
 
     val lazyListState = rememberLazyListState()
 
@@ -100,25 +103,19 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Good evening,",
-                        color = TextSecondary,
-                        fontSize = 15.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Alex 👋",
-                        color = BrightNeonPurple,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.img_purple_flame),
+                    contentDescription = "Viora Flame Logo",
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Find your perfect match 💜",
+                    text = "Viora",
                     color = Color.White,
-                    fontSize = 18.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -273,13 +270,7 @@ fun HomeScreen(
             }
         }
 
-        // Connection Controller and Interconnectivity Dashboards
-        NetworkSyncDashboard(
-            viewModel = viewModel,
-            isOnline = isOnline,
-            isSlowConnection = isSlowConnection,
-            pendingQueueSize = pendingQueue.size
-        )
+
 
         if (!isOnline) {
             Box(
@@ -421,7 +412,12 @@ fun HomeScreen(
                                 viewModel.toggleFollowUser(it.id, it.isFollowing)
                             }
                         },
-                        onPostClick = { viewModel.setViewingFullscreenPost(post) }
+                        onPostClick = { viewModel.setViewingFullscreenPost(post) },
+                        onProfileClick = {
+                            matchingProfile?.let {
+                                selectedProfileForDetail = it
+                            }
+                        }
                     )
                 }
             }
@@ -470,6 +466,9 @@ fun HomeScreen(
                     parentComments.forEach { parent ->
                         // 1. Top-Level Parent Comment
                         item(key = parent.id) {
+                            val parentProfile = profiles.find { it.name.equals(parent.authorName, ignoreCase = true) }
+                            val isMeParent = myProfileState?.name?.equals(parent.authorName, ignoreCase = true) ?: (parent.authorName == "Sarah Johnson")
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -486,6 +485,9 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .size(36.dp)
                                         .clip(CircleShape)
+                                        .clickable {
+                                            parentProfile?.let { selectedProfileForDetail = it }
+                                        }
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
@@ -494,7 +496,38 @@ fun HomeScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text(parent.authorName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = parent.authorName,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.clickable {
+                                                    parentProfile?.let { selectedProfileForDetail = it }
+                                                }
+                                            )
+                                            if (parentProfile != null && !isMeParent && !parentProfile.isFollowing && !parentProfile.isMatched) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(PrimaryPinkPurple)
+                                                        .clickable {
+                                                            viewModel.toggleFollowUser(parentProfile.id, parentProfile.isFollowing)
+                                                        }
+                                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Follow",
+                                                        color = Color.White,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                         
                                         val mAgo = (System.currentTimeMillis() - parent.timestamp) / 60000
                                         val timeStr = if (mAgo < 1) "just now" else if (mAgo < 60) "${mAgo}m ago" else "${mAgo / 60}h ago"
@@ -550,6 +583,9 @@ fun HomeScreen(
                         // 2. Inline Indented Replies (Threaded)
                         val replies = comments.filter { it.parentId == parent.id }
                         items(replies, key = { it.id }) { reply ->
+                            val replyProfile = profiles.find { it.name.equals(reply.authorName, ignoreCase = true) }
+                            val isMeReply = myProfileState?.name?.equals(reply.authorName, ignoreCase = true) ?: (reply.authorName == "Sarah Johnson")
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -576,6 +612,9 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .size(28.dp)
                                         .clip(CircleShape)
+                                        .clickable {
+                                            replyProfile?.let { selectedProfileForDetail = it }
+                                        }
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
@@ -584,7 +623,38 @@ fun HomeScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text(reply.authorName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = reply.authorName,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.clickable {
+                                                    replyProfile?.let { selectedProfileForDetail = it }
+                                                }
+                                            )
+                                            if (replyProfile != null && !isMeReply && !replyProfile.isFollowing && !replyProfile.isMatched) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(PrimaryPinkPurple)
+                                                        .clickable {
+                                                            viewModel.toggleFollowUser(replyProfile.id, replyProfile.isFollowing)
+                                                        }
+                                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Follow",
+                                                        color = Color.White,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                         
                                         val mAgo = (System.currentTimeMillis() - reply.timestamp) / 60000
                                         val timeStr = if (mAgo < 1) "just now" else if (mAgo < 60) "${mAgo}m ago" else "${mAgo / 60}h ago"
@@ -708,6 +778,40 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (selectedProfileForDetail != null) {
+        val detailProfile = selectedProfileForDetail!!
+        val liveProfile = profiles.find { it.id == detailProfile.id } ?: detailProfile
+        val profilePosts = posts.filter { it.authorId == liveProfile.id }
+        
+        FullProfileDetailOverlay(
+            profile = liveProfile,
+            posts = profilePosts,
+            onDismiss = { selectedProfileForDetail = null },
+            onToggleFollow = {
+                viewModel.toggleFollowUser(liveProfile.id, liveProfile.isFollowing)
+            },
+            onMessage = {
+                viewModel.setActiveChat(liveProfile)
+                viewModel.setTab(2) // Jump to Chat
+                selectedProfileForDetail = null
+                onNavigateToChat()
+            },
+            onInvite = {},
+            onSeeFollowers = {},
+            onReport = {
+                viewModel.reportProfile(liveProfile.id, "Inappropriate behavior reported via home feed")
+                selectedProfileForDetail = null
+            },
+            onBlock = {
+                viewModel.blockProfile(liveProfile.id)
+                selectedProfileForDetail = null
+            },
+            onPostClick = { clickedPost ->
+                viewModel.setViewingFullscreenPost(clickedPost)
+            }
+        )
     }
 }
 
@@ -857,7 +961,8 @@ fun PostFeedCard(
     onLike: () -> Unit,
     onCommentClick: () -> Unit,
     onFollowToggle: () -> Unit,
-    onPostClick: () -> Unit
+    onPostClick: () -> Unit,
+    onProfileClick: () -> Unit
 ) {
     val context = LocalContext.current
     val isShortWithBg = post.backgroundColor != null && post.backgroundColor != "none" && post.caption.length <= 100 && post.imageUrls.isEmpty() && post.videoUrl == null
@@ -923,7 +1028,10 @@ fun PostFeedCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { onProfileClick() }
+                ) {
                     if (simulatedLoadDelayComplete) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
@@ -1032,6 +1140,7 @@ fun PostFeedCard(
                         .fillMaxWidth()
                         .height(290.dp)
                         .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black)
                         .clickable { onPostClick() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -1042,7 +1151,7 @@ fun PostFeedCard(
                                 .crossfade(true)
                                 .build(),
                             contentDescription = "Post Artwork",
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -1292,12 +1401,31 @@ fun PostFeedCard(
                             },
                         contentAlignment = Alignment.Center
                     ) {
+                        // Beautiful ambient background to avoid black/empty edges
+                        post.thumbnailUrl?.let { thumbUrl ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(thumbUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // Translucent overlay to darken and smooth the ambient backdrop
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.7f))
+                            )
+                        }
+
                         // Buffering Shimmer Skeleton
                         if (isPreparingVideo) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black),
+                                    .background(Color.Black.copy(alpha = 0.5f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1308,7 +1436,7 @@ fun PostFeedCard(
                             }
                         }
 
-                        // Native Video View Embedded
+                        // Native Video View Embedded with dynamic aspect ratio and auto-alignment
                         androidx.compose.ui.viewinterop.AndroidView(
                             factory = { ctx ->
                                 android.widget.VideoView(ctx).apply {
@@ -1347,7 +1475,9 @@ fun PostFeedCard(
                                     mp.setVolume(currentVol, currentVol)
                                 }
                             },
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .aspectRatio(calculatedRatio)
+                                .align(Alignment.Center)
                         )
 
                     // Double tap heart scale overlay

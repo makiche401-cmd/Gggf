@@ -48,6 +48,20 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import com.example.ui.theme.*
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Shadow
+import kotlin.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.Player
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.viewmodel.VioraViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -688,150 +702,129 @@ fun FullscreenPostOverlay(
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = Color(0xFF07030A) // Deeper night black backdrop
+            color = Color.Black
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
+            val globalMute by viewModel.isMuted.collectAsState()
+            var isPreparingVideo by remember { mutableStateOf(true) }
+            val coroutineScope = rememberCoroutineScope()
+            var showHeartState by remember { mutableStateOf(false) }
+
+            Box(
+                modifier = Modifier.fillMaxSize()
             ) {
-                // Header Area with Profile Details and Close/Edit Accent Actions
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                // Determine layout types
+                val isShortBg = post.backgroundColor != null && post.backgroundColor != "none" && post.caption.length <= 100 && post.imageUrls.isEmpty() && post.videoUrl == null
+
+                // 1. Media Background (fillMaxSize)
+                if (post.videoUrl != null) {
+                    // Video View / PlayerView
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(post.id) {
+                                detectTapGestures(
+                                    onDoubleTap = {
+                                        if (!post.isLiked) {
+                                            viewModel.togglePostLike(post)
+                                        }
+                                        coroutineScope.launch {
+                                            showHeartState = true
+                                            delay(600)
+                                            showHeartState = false
+                                        }
+                                    },
+                                    onTap = { viewModel.toggleMute() }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(post.authorAvatar)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = post.authorName,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .border(1.dp, BorderColor, CircleShape)
-                        )
-                        Column {
-                            Text(
-                                text = post.authorName,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                        ZoomableContainer(key = post.id) {
+                            Media3VideoPlayer(
+                                videoUrl = post.videoUrl,
+                                isMuted = globalMute,
+                                onPlaybackStateChanged = { buffering ->
+                                    isPreparingVideo = buffering
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
-                            Text(
-                                text = post.authorLabel,
-                                color = TextSecondary,
-                                fontSize = 11.sp
+                        }
+
+                        if (isPreparingVideo) {
+                            CircularProgressIndicator(
+                                color = BrightNeonPurple,
+                                modifier = Modifier.size(44.dp)
                             )
                         }
                     }
+                } else if (isShortBg) {
+                    // Ambient Text Card centered with full screen backdrop
+                    val brush = when (post.backgroundColor) {
+                        "cosmic_violet" -> Brush.linearGradient(listOf(Color(0xFF4A148C), Color(0xFF1A237E)))
+                        "solar_flame" -> Brush.linearGradient(listOf(Color(0xFF880E4F), Color(0xFFE65100)))
+                        "aurora_teal" -> Brush.linearGradient(listOf(Color(0xFF003020), Color(0xFF0C2B52)))
+                        "cotton_candy" -> Brush.linearGradient(listOf(Color(0xFF9C27B0), Color(0xFFE91E63)))
+                        "royal_gold" -> Brush.linearGradient(listOf(Color(0xFF2E1A47), Color(0xFF8B6508)))
+                        "crimson_dark" -> Brush.linearGradient(listOf(Color(0xFF3E0610), Color(0xFF150205)))
+                        else -> Brush.linearGradient(listOf(Color(0xFF263238), Color(0xFF10081C)))
+                    }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(brush),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (post.authorId == "me") {
-                            IconButton(
-                                onClick = { showEditDialog = true },
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(BrightNeonPurple.copy(alpha = 0.2f))
-                                    .border(1.dp, BrightNeonPurple.copy(alpha = 0.5f), CircleShape)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .aspectRatio(1f)
+                                .border(1.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp)),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f))
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().padding(24.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Edit Post Settings",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
+                                Text(
+                                    text = post.caption,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
-
-                        // Elegant Circular glass-style close button
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close Fullscreen",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
                     }
-                }
-
-                // Main visual canvas segment
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val isShortBg = post.backgroundColor != null && post.backgroundColor != "none" && post.caption.length <= 100 && post.imageUrls.isEmpty() && post.videoUrl == null
-
-                    if (post.videoUrl != null) {
-                        // Immersive multi-ratio HD video player segment
-                        var isPreparingVideo by remember { mutableStateOf(true) }
-                        var mediaPlayerInstance by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
-                        val globalMute by viewModel.isMuted.collectAsState()
-
-                        // Double tap like animation triggers
-                        var showHeartState by remember { mutableStateOf(false) }
-                        val coroutineScope = rememberCoroutineScope()
-
-                        var calculatedRatio by remember(post.id) { mutableStateOf(9f / 16f) }
-                        var detectedPlatformStr by remember(post.id) { mutableStateOf("TikTok Reel (9:16)") }
-                        var videoResolutionLabel by remember(post.id) { mutableStateOf("1080x1920") }
-
-                        LaunchedEffect(post.videoUrl) {
-                            if (post.videoUrl.contains("skating") || post.videoUrl.contains("dancing") || post.videoUrl.contains("vertical") || post.videoUrl.contains("reel") || post.videoUrl.contains("tiktok")) {
-                                calculatedRatio = 0.5625f
-                                detectedPlatformStr = "TikTok Reel"
-                                videoResolutionLabel = "1080x1920 (Portrait)"
-                            } else if (post.videoUrl.contains("joyrides") || post.videoUrl.contains("bunny") || post.videoUrl.contains("landscape")) {
-                                calculatedRatio = 1.777f
-                                detectedPlatformStr = "YouTube Wide"
-                                videoResolutionLabel = "1920x1080 (Landscape)"
-                            } else {
-                                calculatedRatio = 1.0f
-                                detectedPlatformStr = "Facebook Square"
-                                videoResolutionLabel = "1080x1080 (Square)"
+                } else if (post.imageUrls.isNotEmpty()) {
+                    // Photo Viewer (Carousel or Scroll All Mode)
+                    if (isScrollAllMode && post.imageUrls.size > 1) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(top = 100.dp, bottom = 120.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            items(post.imageUrls) { imgUrl ->
+                                ZoomableContainer(key = imgUrl) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(imgUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "Post Item Fullscreen",
+                                        contentScale = ContentScale.Crop, // Aspect Fill Center Crop behavior
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(550.dp)
+                                    )
+                                }
                             }
                         }
-
-                        // Views count incrementing once on entrance
-                        LaunchedEffect(post.id) {
-                            viewModel.incrementViews(post.id)
-                        }
-
-                        DisposableEffect(post.id) {
-                            onDispose {
-                                mediaPlayerInstance?.stop()
-                                mediaPlayerInstance?.release()
-                                mediaPlayerInstance = null
-                            }
-                        }
-
+                    } else {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clickable { viewModel.toggleMute() }
                                 .pointerInput(post.id) {
                                     detectTapGestures(
                                         onDoubleTap = {
@@ -848,429 +841,302 @@ fun FullscreenPostOverlay(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            // Loading skeleton / progress
-                            if (isPreparingVideo) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.7f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        CircularProgressIndicator(color = BrightNeonPurple, modifier = Modifier.size(40.dp))
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        Text("Auto-detecting ratio & buffering stream...", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
-                                    }
+                            AnimatedContent(
+                                targetState = currentImageIndex,
+                                transitionSpec = {
+                                    fadeIn(animationSpec = tween(350)) togetherWith fadeOut(animationSpec = tween(350))
+                                },
+                                label = "ImageTransition",
+                                modifier = Modifier.fillMaxSize()
+                            ) { index ->
+                                ZoomableContainer(key = index) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(post.imageUrls[index])
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "Post Image Fullscreen",
+                                        contentScale = ContentScale.Crop, // Center Crop behavior
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                             }
 
-                            // Dynamic widescreen or vertical safe container to avoid stretching
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.95f)
-                                    .fillMaxHeight(0.92f)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                                    .background(Color.Black),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                // Native Video View renderer wrapping with dynamic aspect ratio constraints
-                                androidx.compose.ui.viewinterop.AndroidView(
-                                    factory = { ctx ->
-                                        android.widget.VideoView(ctx).apply {
-                                            setVideoURI(android.net.Uri.parse(post.videoUrl))
-                                            setOnPreparedListener { mp ->
-                                                mediaPlayerInstance = mp
-                                                val w = mp.videoWidth
-                                                val h = mp.videoHeight
-                                                if (w > 0 && h > 0) {
-                                                    calculatedRatio = w.toFloat() / h.toFloat()
-                                                    val category = if (calculatedRatio < 0.8f) {
-                                                        "TikTok Reel"
-                                                    } else if (calculatedRatio > 1.3f) {
-                                                        "YouTube Wide"
-                                                    } else {
-                                                        "Facebook Square"
-                                                    }
-                                                    detectedPlatformStr = category
-                                                    videoResolutionLabel = "${w}x${h} HD"
-                                                }
-                                                mp.isLooping = true
-                                                val currentVol = if (globalMute) 0f else 1f
-                                                mp.setVolume(currentVol, currentVol)
-                                                mp.start()
-                                                isPreparingVideo = false
-                                            }
-                                            setOnErrorListener { _, _, _ ->
-                                                isPreparingVideo = false
-                                                true
-                                            }
-                                        }
-                                    },
-                                    update = { vv ->
-                                        mediaPlayerInstance?.let { mp ->
-                                            val currentVol = if (globalMute) 0f else 1f
-                                            mp.setVolume(currentVol, currentVol)
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .aspectRatio(calculatedRatio)
-                                        .clip(RoundedCornerShape(16.dp))
-                                )
-                            }
-
-                            // Heart double-tap animation
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = showHeartState,
-                                enter = scaleIn() + fadeIn(),
-                                exit = scaleOut() + fadeOut()
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Favorite,
-                                    contentDescription = "Double tap heart like",
-                                    tint = AccentCrimsonPink,
-                                    modifier = Modifier.size(100.dp)
-                                )
-                            }
-
-                            // Floating Mute Button & Views count
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(24.dp)
-                                    .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                                    .border(0.5.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Visibility,
-                                    contentDescription = "",
-                                    tint = Color.White.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text("${post.viewsCount + 1} views", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Box(modifier = Modifier.width(1.dp).height(12.dp).background(Color.White.copy(alpha = 0.3f)))
-                                Icon(
-                                    imageVector = if (globalMute) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
-                                    contentDescription = "Volume State Toggle",
-                                    tint = Color.White,
-                                    modifier = Modifier
-                                        .size(15.dp)
-                                        .clickable { viewModel.toggleMute() }
-                                )
-                            }
-                        }
-                    } else if (isShortBg) {
-                        // Ambient text post overlay canvas
-                        val brush = when (post.backgroundColor) {
-                            "cosmic_violet" -> Brush.linearGradient(listOf(Color(0xFF4A148C), Color(0xFF1A237E)))
-                            "solar_flame" -> Brush.linearGradient(listOf(Color(0xFF880E4F), Color(0xFFE65100)))
-                            "aurora_teal" -> Brush.linearGradient(listOf(Color(0xFF003020), Color(0xFF0C2B52)))
-                            "cotton_candy" -> Brush.linearGradient(listOf(Color(0xFF9C27B0), Color(0xFFE91E63)))
-                            "royal_gold" -> Brush.linearGradient(listOf(Color(0xFF2E1A47), Color(0xFF8B6508)))
-                            "crimson_dark" -> Brush.linearGradient(listOf(Color(0xFF3E0610), Color(0xFF150205)))
-                            else -> null
-                        }
-                        val solidColor = if (post.backgroundColor == "charcoal_solid") Color(0xFF263238) else Color(0xFF10081C)
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.88f)
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(brush ?: Brush.linearGradient(listOf(solidColor, solidColor)))
-                                .border(1.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = post.caption,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(12.dp)
-                            )
-                        }
-                    } else if (post.imageUrls.isNotEmpty()) {
-                        // Image viewer
-                        if (isScrollAllMode && post.imageUrls.size > 1) {
-                            // Immersive toggle layout: Allow user to vertically scroll ALL high-quality images sequentially
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(bottom = 24.dp, start = 16.dp, end = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                item {
-                                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                                        Text(
-                                            text = "Multi-Image Gallery (${post.imageUrls.size} items)",
-                                            color = BrightNeonPurple,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = post.caption,
-                                            color = Color.White,
-                                            fontSize = 14.sp
-                                        )
-                                    }
-                                }
-
-                                items(post.imageUrls) { imgUrl ->
-                                    Card(
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(containerColor = DarkSurfaceCard),
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(LocalContext.current)
-                                                .data(imgUrl)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = "Post Item Fullscreen",
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .heightIn(max = 480.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            // Standard full width interactive Carousel Slider
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(post.imageUrls[currentImageIndex])
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = "Post Image Fullscreen",
-                                    contentScale = ContentScale.Fit,
+                            // Left and Right manual swipe/tap regions or overlay pager buttons
+                            if (post.imageUrls.size > 1) {
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .fillMaxHeight(0.88f)
-                                )
-
-                                // Overlay pager button controllers
-                                if (post.imageUrls.size > 1) {
-                                    Row(
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedImageIndex = if (selectedImageIndex > 0) {
+                                                selectedImageIndex - 1
+                                            } else {
+                                                post.imageUrls.size - 1
+                                            }
+                                        },
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.4f))
+                                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), CircleShape)
                                     ) {
-                                        IconButton(
-                                            onClick = {
-                                                selectedImageIndex = if (selectedImageIndex > 0) {
-                                                    selectedImageIndex - 1
-                                                } else {
-                                                    post.imageUrls.size - 1
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.Black.copy(alpha = 0.5f))
-                                                .border(0.5.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.ChevronLeft,
-                                                contentDescription = "Prev",
-                                                tint = Color.White
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = {
-                                                selectedImageIndex = if (selectedImageIndex < post.imageUrls.size - 1) {
-                                                    selectedImageIndex + 1
-                                                } else {
-                                                    0
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.Black.copy(alpha = 0.5f))
-                                                .border(0.5.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.ChevronRight,
-                                                contentDescription = "Next",
-                                                tint = Color.White
-                                            )
-                                        }
-                                    }
-
-                                    // Image numeric tag
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(16.dp)
-                                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
-                                            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Text(
-                                            text = "${currentImageIndex + 1}/${post.imageUrls.size}",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronLeft,
+                                            contentDescription = "Prev",
+                                            tint = Color.White
                                         )
                                     }
+
+                                    IconButton(
+                                        onClick = {
+                                            selectedImageIndex = if (selectedImageIndex < post.imageUrls.size - 1) {
+                                                selectedImageIndex + 1
+                                            } else {
+                                                0
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.4f))
+                                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ChevronRight,
+                                            contentDescription = "Next",
+                                            tint = Color.White
+                                        )
+                                    }
+                                }
+
+                                // Image Index tag
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .statusBarsPadding()
+                                        .padding(top = 80.dp, end = 20.dp)
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "${currentImageIndex + 1}/${post.imageUrls.size}",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                // Interactive Bottom Detail panel (Actions, Stats & Captions)
-                val isShortBg = post.backgroundColor != null && post.backgroundColor != "none" && post.caption.length <= 100 && post.imageUrls.isEmpty()
+                // 2. Gradients and Overlays for high-contrast text readability
+                if (!isShortBg) {
+                    // Top Shadow
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                                )
+                            )
+                            .align(Alignment.TopCenter)
+                    )
+
+                    // Bottom Shadow
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
+                                )
+                            )
+                            .align(Alignment.BottomCenter)
+                    )
+                }
+
+                // 3. Floating Close & Edit Header at the Top
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Top-Left Brand / Subtitle indicator
+                    Text(
+                        text = if (post.videoUrl != null) "Viora Reel" else "Viora Post",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 3f))
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (post.authorId == "me") {
+                            IconButton(
+                                onClick = { showEditDialog = true },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(BrightNeonPurple.copy(alpha = 0.3f))
+                                    .border(1.dp, BrightNeonPurple.copy(alpha = 0.6f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Edit Post Settings",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.45f))
+                                .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Fullscreen",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // 4. Double tap Like heartbeat animation
+                AnimatedVisibility(
+                    visible = showHeartState,
+                    enter = scaleIn() + fadeIn(),
+                    exit = scaleOut() + fadeOut(),
+                    modifier = Modifier.align(Alignment.Center)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "Double tap heart like",
+                        tint = AccentCrimsonPink,
+                        modifier = Modifier.size(110.dp)
+                    )
+                }
+
+                // 5. Floating Bottom-Left details (Author & Caption)
                 if (!isShortBg) {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color.Black.copy(alpha = 0.45f))
-                            .border(BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f)))
-                            .padding(horizontal = 24.dp, vertical = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                            .align(Alignment.BottomStart)
+                            .navigationBarsPadding()
+                            .padding(start = 20.dp, bottom = 24.dp, end = 90.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (!(isScrollAllMode && post.imageUrls.size > 1)) {
-                            Text(
-                                text = post.caption,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                modifier = Modifier.fillMaxWidth()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(post.authorAvatar)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = post.authorName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .border(1.5.dp, Color.White, CircleShape)
                             )
+                            Column {
+                                Text(
+                                    text = post.authorName,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f))
+                                )
+                                Text(
+                                    text = post.authorLabel,
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp,
+                                    style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f))
+                                )
+                            }
                         }
 
-                        // Audience/Security Label tags
+                        Text(
+                            text = post.caption,
+                            color = Color.White,
+                            fontSize = 13.5.sp,
+                            lineHeight = 18.sp,
+                            style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f)),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        // Privacy & Comment Permission tags
                         if (post.privacy != "Everyone" || post.commentPermission != "Everyone") {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (post.privacy != "Everyone") {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier
+                                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 3.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Visibility,
                                             contentDescription = null,
                                             tint = BrightNeonPurple,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(10.dp)
                                         )
                                         Text(
-                                            text = "Visibility: ${post.privacy}",
-                                            color = TextSecondary,
-                                            fontSize = 11.sp
+                                            text = post.privacy,
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                                 if (post.commentPermission != "Everyone") {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier
+                                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 3.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Filled.Comment,
                                             contentDescription = null,
                                             tint = BrightNeonPurple,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(10.dp)
                                         )
                                         Text(
                                             text = "Comments: ${post.commentPermission}",
-                                            color = TextSecondary,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Post metrics displays
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Liked badge",
-                                        tint = if (post.isLiked) AccentCrimsonPink else Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "${post.likesCount}",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Comment,
-                                        contentDescription = "Comments label",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "${post.commentsCount}",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            // Dynamic action toggle triggered on multi-image posts
-                            if (post.imageUrls.size > 1) {
-                                Button(
-                                    onClick = { isScrollAllMode = !isScrollAllMode },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isScrollAllMode) BrightNeonPurple else Color.White.copy(alpha = 0.12f)
-                                    ),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                                    border = BorderStroke(1.dp, if (isScrollAllMode) Color.Transparent else Color.White.copy(alpha = 0.18f))
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isScrollAllMode) Icons.Default.AspectRatio else Icons.Default.Menu,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = if (isScrollAllMode) "Show Cover Slider" else "See More (Scroll All)",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -1279,8 +1145,238 @@ fun FullscreenPostOverlay(
                         }
                     }
                 }
+
+                // 6. Floating Bottom-Right actions stack
+                if (!isShortBg) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .navigationBarsPadding()
+                            .padding(end = 16.dp, bottom = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Like Button
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.togglePostLike(post) },
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Like",
+                                    tint = if (post.isLiked) AccentCrimsonPink else Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Text(
+                                text = "${post.likesCount}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f))
+                            )
+                        }
+
+                        // Comment Button
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { /* Comments dialog or display */ },
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Comment,
+                                    contentDescription = "Comments",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Text(
+                                text = "${post.commentsCount}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f))
+                            )
+                        }
+
+                        // Views count display
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { /* Info */ },
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Visibility,
+                                    contentDescription = "Views",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Text(
+                                text = "${post.viewsCount + 1}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                style = androidx.compose.ui.text.TextStyle(shadow = Shadow(color = Color.Black, blurRadius = 4f))
+                            )
+                        }
+
+                        // Video Volume Mute toggle or Multi-image Scroll All toggle
+                        if (post.videoUrl != null) {
+                            IconButton(
+                                onClick = { viewModel.toggleMute() },
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.5f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (globalMute) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
+                                    contentDescription = "Toggle Mute",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        if (post.imageUrls.size > 1) {
+                            IconButton(
+                                onClick = { isScrollAllMode = !isScrollAllMode },
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isScrollAllMode) BrightNeonPurple else Color.Black.copy(alpha = 0.5f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (isScrollAllMode) Icons.Default.AspectRatio else Icons.Default.Menu,
+                                    contentDescription = "Scroll Mode",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// HELPER COMPONENTS FOR EDGE-TO-EDGE PINCH ZOOM & MEDIA3 VIDEO PLAYBACK
+// -----------------------------------------------------------------------------
+
+@OptIn(UnstableApi::class)
+@Composable
+fun Media3VideoPlayer(
+    videoUrl: String,
+    isMuted: Boolean,
+    onPlaybackStateChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val exoPlayer = remember(context) {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_ALL
+            playWhenReady = true
+        }
+    }
+
+    // Set up media item
+    LaunchedEffect(videoUrl) {
+        val mediaItem = MediaItem.fromUri(videoUrl)
+        exoPlayer.setMediaItem(mediaItem)
+        exoPlayer.prepare()
+    }
+
+    // Track state changes to show buffering indicator
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                onPlaybackStateChanged(state == Player.STATE_BUFFERING)
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+        }
+    }
+
+    // Handle mute state changes
+    LaunchedEffect(isMuted) {
+        exoPlayer.volume = if (isMuted) 0f else 1.0f
+    }
+
+    // Correct cleanup when video player goes out of recomposition
+    DisposableEffect(Unit) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            }
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun ZoomableContainer(
+    key: Any,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    var scale by remember(key) { mutableStateOf(1f) }
+    var offset by remember(key) { mutableStateOf(Offset.Zero) }
+
+    val state = rememberTransformableState { zoomChange, offsetChange, _ ->
+        scale = (scale * zoomChange).coerceIn(1f, 4f)
+        offset += offsetChange * scale
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .transformable(state = state)
+            .graphicsLayer(
+                scaleX = scale,
+                scaleY = scale,
+                translationX = offset.x,
+                translationY = offset.y
+            )
+    ) {
+        content()
     }
 }
 

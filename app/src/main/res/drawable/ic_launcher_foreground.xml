@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_viora_logo"
+        android:drawable="@drawable/img_purple_flame"
         android:gravity="center" />
 </layer-list>

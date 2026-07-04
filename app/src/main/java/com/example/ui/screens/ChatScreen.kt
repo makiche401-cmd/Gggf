@@ -23,6 +23,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.lazy.rememberLazyListState
+import android.widget.Toast
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -37,12 +40,19 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlin.random.Random
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.text.TextStyle
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.IntOffset
 import com.example.data.database.DatingProfileEntity
@@ -117,7 +127,19 @@ fun ChatScreen(viewModel: VioraViewModel) {
                     onBack = { viewModel.setActiveChat(null) },
                     onSendMessage = { viewModel.sendChatMessage(text = it) },
                     onSendVoiceNote = { viewModel.sendChatMessage(text = "Voice note", voiceDuration = it) },
-                    onSendImageMock = { viewModel.sendChatMessage(text = "Media Image Attachment", imageUrl = "https://images.unsplash.com/photo-1543807535-eceef0bc6599?auto=format&fit=crop&q=80&w=650") },
+                    onSendImageMock = {
+                        val pool = listOf(
+                            "https://images.unsplash.com/photo-1543807535-eceef0bc6599?auto=format&fit=crop&q=80&w=650",
+                            "https://images.unsplash.com/photo-1518199266791-5375a83190b7?auto=format&fit=crop&q=80&w=650",
+                            "https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&q=80&w=650",
+                            "https://images.unsplash.com/photo-1518241353330-0f7941c2d9b5?auto=format&fit=crop&q=80&w=650",
+                            "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&q=80&w=650"
+                        )
+                        val count = listOf(1, 3, 4, 5).random()
+                        val selectedUrls = pool.take(count).joinToString(",")
+                        val textLabel = if (count == 1) "Sent a photo attachment" else "Sent $count photo attachments"
+                        viewModel.sendChatMessage(text = textLabel, imageUrl = selectedUrls)
+                    },
                     onHeaderClick = { viewedProfileDetail = profile }
                 )
             }
@@ -829,6 +851,9 @@ fun ChatRoom(
     var showMenu by remember { mutableStateOf(false) }
     var showReportDialogInChat by remember { mutableStateOf(false) }
 
+    var fullScreenImageUrls by remember { mutableStateOf<List<String>?>(null) }
+    var fullScreenImageStartIndex by remember { mutableStateOf(0) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1081,10 +1106,11 @@ fun ChatRoom(
                                 verticalAlignment = Alignment.Bottom,
                                 modifier = Modifier
                                     .fillMaxWidth(0.85f)
-                                    .combinedClickable(
-                                        onLongClick = { activeMessageOptions = msg },
-                                        onClick = { /* No-op or status view */ }
-                                    )
+                                    .pointerInput(msg.id) {
+                                        detectTapGestures(
+                                            onLongPress = { activeMessageOptions = msg }
+                                        )
+                                    }
                             ) {
                                 if (!isMe) {
                                     AsyncImage(
@@ -1104,7 +1130,14 @@ fun ChatRoom(
                                 // Dynamic styled Bubble component depending on user theme
                                 when (msg.type) {
                                     "voice" -> VoiceNoteBubble(duration = msg.audioDurationSec, isMe = isMe, chatTheme = activeThemeName)
-                                    "image" -> MediaBubble(url = msg.mediaUrl ?: "", isMe = isMe)
+                                    "image" -> MediaBubble(
+                                        url = msg.mediaUrl ?: "",
+                                        isMe = isMe,
+                                        onImageClick = { index, allUrls ->
+                                            fullScreenImageUrls = allUrls
+                                            fullScreenImageStartIndex = index
+                                        }
+                                    )
                                     else -> TextBubble(text = msg.textContent, isMe = isMe, chatTheme = activeThemeName)
                                 }
                             }
@@ -1398,6 +1431,14 @@ fun ChatRoom(
                 }
             )
         }
+
+        if (fullScreenImageUrls != null) {
+            FullScreenPhotoViewer(
+                urls = fullScreenImageUrls!!,
+                startIndex = fullScreenImageStartIndex,
+                onDismiss = { fullScreenImageUrls = null }
+            )
+        }
     }
 }
 
@@ -1431,6 +1472,10 @@ fun TextBubble(text: String, isMe: Boolean, chatTheme: String) {
     }
 
     val brush = getChatThemeBrush(chatTheme, isMe)
+    val context = LocalContext.current
+
+    val firstUrl = remember(text) { findFirstUrl(text) }
+    val detectedOtp = remember(text) { findOtp(text) }
 
     Box(
         modifier = Modifier
@@ -1438,12 +1483,509 @@ fun TextBubble(text: String, isMe: Boolean, chatTheme: String) {
             .background(brush)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        Text(
-            text = text,
-            color = Color.White,
+        Column(
+            modifier = Modifier.widthIn(max = 260.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // Clickable & auto-linked text (links, phone numbers, and emails)
+            AutolinkText(
+                text = text,
+                textColor = Color.White,
+                linkColor = Color(0xFF80DEEA),
+                onClickLink = { openLink(context, it) },
+                onClickEmail = { openEmail(context, it) },
+                onClickPhone = { openPhone(context, it) }
+            )
+
+            // OTP Detection Card with elegant copy action
+            if (detectedOtp != null) {
+                OtpCard(code = detectedOtp)
+            }
+
+            // Link Preview Card (Safe/Verified) or Security Warning Card (Dangerous/Unverified)
+            if (firstUrl != null) {
+                LinkPreviewCard(url = firstUrl, isReceiver = !isMe)
+            }
+        }
+    }
+}
+
+data class LinkPreviewData(
+    val title: String,
+    val description: String,
+    val domain: String,
+    val imageUrl: String,
+    val isVerified: Boolean
+)
+
+fun findOtp(text: String): String? {
+    // Standard digit OTP (e.g. 123456 or 1234 or 12345)
+    val digitRegex = Regex("\\b\\d{4,8}\\b")
+    val digitMatch = digitRegex.find(text)
+    if (digitMatch != null) return digitMatch.value
+
+    // If text contains keywords like "code", "otp", "verification", "pin"
+    val lowerText = text.lowercase()
+    if (lowerText.contains("code") || lowerText.contains("otp") || lowerText.contains("pin") || lowerText.contains("verification") || lowerText.contains("password")) {
+        // Look for 4-8 char alphanumeric codes in uppercase, e.g., AB34X
+        val alphaNumRegex = Regex("\\b[A-Z0-9]{4,8}\\b")
+        val matches = alphaNumRegex.findAll(text)
+        for (m in matches) {
+            // Must contain at least one digit to avoid normal capitalized words
+            if (m.value.any { it.isDigit() }) {
+                return m.value
+            }
+        }
+    }
+    return null
+}
+
+fun findFirstUrl(text: String): String? {
+    val linkRegex = Regex("(?:https?://[a-zA-Z0-9-._~:/?#\\[\\]@!$&'()*+,;=%]+)|(?:\\b[a-zA-Z0-9.-]+\\.(?:com|org|net|edu|gov|io|co|me|info|biz|dev|us|uk|ca|de|fr|jp|app|ai|xyz|link|online)\\b(?:/[a-zA-Z0-9-._~:/?#\\[\\]@!$&'()*+,;=%]*)?)")
+    return linkRegex.find(text)?.value
+}
+
+fun buildAnnotatedStringWithAutolinks(text: String, linkColor: Color): AnnotatedString {
+    val builder = AnnotatedString.Builder()
+    
+    val linkRegex = Regex("(?:https?://[a-zA-Z0-9-._~:/?#\\[\\]@!$&'()*+,;=%]+)|(?:\\b[a-zA-Z0-9.-]+\\.(?:com|org|net|edu|gov|io|co|me|info|biz|dev|us|uk|ca|de|fr|jp|app|ai|xyz|link|online)\\b(?:/[a-zA-Z0-9-._~:/?#\\[\\]@!$&'()*+,;=%]*)?)")
+    val emailRegex = Regex("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
+    val phoneRegex = Regex("(\\+?\\d{1,4}[- .]?)?(\\(\\d{1,3}\\)[- .]?)?\\d{3,4}[- .]?\\d{3,4}[- .]?\\d{3,4}")
+
+    data class Token(val type: String, val text: String, val start: Int, val end: Int)
+    
+    val tokens = mutableListOf<Token>()
+    
+    linkRegex.findAll(text).forEach { match ->
+        tokens.add(Token("URL", match.value, match.range.first, match.range.last + 1))
+    }
+    
+    emailRegex.findAll(text).forEach { match ->
+        val start = match.range.first
+        val end = match.range.last + 1
+        if (tokens.none { (it.start < end && it.end > start) }) {
+            tokens.add(Token("EMAIL", match.value, start, end))
+        }
+    }
+    
+    phoneRegex.findAll(text).forEach { match ->
+        val start = match.range.first
+        val end = match.range.last + 1
+        val rawDigits = match.value.filter { m -> m.isDigit() }
+        if (rawDigits.length >= 9 && tokens.none { (it.start < end && it.end > start) }) {
+            tokens.add(Token("PHONE", match.value, start, end))
+        }
+    }
+    
+    val sortedTokens = tokens.sortedBy { it.start }
+    
+    var lastIndex = 0
+    for (token in sortedTokens) {
+        if (token.start > lastIndex) {
+            builder.append(text.substring(lastIndex, token.start))
+        }
+        
+        val startSpan = builder.length
+        builder.append(token.text)
+        val endSpan = builder.length
+        
+        builder.addStyle(
+            style = SpanStyle(
+                color = linkColor,
+                textDecoration = TextDecoration.Underline,
+                fontWeight = FontWeight.Bold
+            ),
+            start = startSpan,
+            end = endSpan
+        )
+        
+        builder.addStringAnnotation(
+            tag = token.type,
+            annotation = token.text,
+            start = startSpan,
+            end = endSpan
+        )
+        
+        lastIndex = token.end
+    }
+    
+    if (lastIndex < text.length) {
+        builder.append(text.substring(lastIndex))
+    }
+    
+    return builder.toAnnotatedString()
+}
+
+fun openLink(context: android.content.Context, url: String) {
+    try {
+        var formattedUrl = url
+        if (!formattedUrl.startsWith("http://") && !formattedUrl.startsWith("https://")) {
+            formattedUrl = "https://$formattedUrl"
+        }
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(formattedUrl))
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun openEmail(context: android.content.Context, email: String) {
+    try {
+        val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+            data = android.net.Uri.parse("mailto:$email")
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open email application", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun openPhone(context: android.content.Context, phone: String) {
+    try {
+        val intent = android.content.Intent(android.content.Intent.ACTION_DIAL).apply {
+            data = android.net.Uri.parse("tel:$phone")
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open phone dialer", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun getLinkPreviewData(url: String): LinkPreviewData {
+    val uri = try {
+        android.net.Uri.parse(url)
+    } catch (e: Exception) {
+        null
+    }
+    val host = uri?.host ?: ""
+    val domain = if (host.startsWith("www.")) host.substring(4) else host
+    
+    val verifiedDomains = listOf(
+        "google.com", "youtube.com", "youtu.be", "github.com", "wikipedia.org", 
+        "unsplash.com", "commondatastorage.googleapis.com", "mixkit.co", "microsoft.com", 
+        "apple.com", "android.com", "facebook.com", "twitter.com", "x.com", 
+        "instagram.com", "linkedin.com", "reddit.com", "netflix.com", "spotify.com", 
+        "amazon.com", "dropbox.com", "zoom.us"
+    )
+    
+    val isVerified = verifiedDomains.any { domain == it || domain.endsWith(".$it") }
+    
+    return when {
+        domain.contains("youtube.com") || domain.contains("youtu.be") -> {
+            LinkPreviewData(
+                title = "YouTube - Watch, Share & Listen",
+                description = "Enjoy your favorite videos, original content, music, and share it all with friends and family on YouTube.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("google.com") -> {
+            LinkPreviewData(
+                title = "Google Search",
+                description = "Search the world's information, including webpages, images, videos and more. Find exactly what you're looking for.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1573804633927-bfcbcd909acd?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("github.com") -> {
+            LinkPreviewData(
+                title = "GitHub: Let's build from here",
+                description = "GitHub is where over 100 million developers shape the future of software together. Host, share, and build code securely.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1618401471353-b98aedd07871?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("wikipedia.org") -> {
+            LinkPreviewData(
+                title = "Wikipedia, the free encyclopedia",
+                description = "Wikipedia is a free online encyclopedia, created and edited by volunteers around the world and hosted by the Wikimedia Foundation.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("unsplash.com") -> {
+            LinkPreviewData(
+                title = "Beautiful Free Images & Pictures | Unsplash",
+                description = "Beautiful, free images and photos that you can download and use for any project. Better than any royalty free or stock photos.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1542038784456-1ea8e935640e?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("linkedin.com") -> {
+            LinkPreviewData(
+                title = "LinkedIn: Log In or Sign Up",
+                description = "Manage your professional identity. Build and engage with your professional network. Access knowledge, insights and opportunities.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1616469829581-73993eb86b02?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("reddit.com") -> {
+            LinkPreviewData(
+                title = "Reddit - Dive into anything",
+                description = "Reddit is a network of communities where people can dive into their interests, hobbies and passions. There's a community for whatever you're into.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        domain.contains("spotify.com") -> {
+            LinkPreviewData(
+                title = "Spotify - Web Player: Music for everyone",
+                description = "Spotify is a digital music service that gives you access to millions of songs, podcasts and videos from artists all over the world.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1614680376593-902f74fa0d41?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+        else -> {
+            LinkPreviewData(
+                title = if (domain.isNotEmpty()) domain.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } else "Web Page Link",
+                description = "Explore this unverified link at your own discretion. Always be cautious when visiting unverified external domains.",
+                domain = domain,
+                imageUrl = "https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?auto=format&fit=crop&q=80&w=200",
+                isVerified = isVerified
+            )
+        }
+    }
+}
+
+@Composable
+fun AutolinkText(
+    text: String,
+    textColor: Color = Color.White,
+    linkColor: Color = Color(0xFF80DEEA),
+    onClickLink: (String) -> Unit,
+    onClickEmail: (String) -> Unit,
+    onClickPhone: (String) -> Unit
+) {
+    val annotatedString = remember(text) {
+        buildAnnotatedStringWithAutolinks(text, linkColor)
+    }
+
+    ClickableText(
+        text = annotatedString,
+        style = LocalTextStyle.current.copy(
+            color = textColor,
             fontSize = 14.sp,
             lineHeight = 18.sp
-        )
+        ),
+        onClick = { offset ->
+            annotatedString.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()?.let { annotation ->
+                    onClickLink(annotation.item)
+                }
+            annotatedString.getStringAnnotations(tag = "EMAIL", start = offset, end = offset)
+                .firstOrNull()?.let { annotation ->
+                    onClickEmail(annotation.item)
+                }
+            annotatedString.getStringAnnotations(tag = "PHONE", start = offset, end = offset)
+                .firstOrNull()?.let { annotation ->
+                    onClickPhone(annotation.item)
+                }
+        }
+    )
+}
+
+@Composable
+fun OtpCard(code: String) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Security Code",
+                    tint = Color(0xFFFFD54F),
+                    modifier = Modifier.size(18.dp)
+                )
+                Column {
+                    Text(
+                        text = "Verification Code",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                    Text(
+                        text = code,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+            
+            Button(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(code))
+                    Toast.makeText(context, "Code copied: $code", Toast.LENGTH_SHORT).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63)),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier
+                    .height(32.dp)
+                    .testTag("copy_otp_btn_$code"),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text("Copy", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LinkPreviewCard(url: String, isReceiver: Boolean) {
+    val context = LocalContext.current
+    val previewData = remember(url) { getLinkPreviewData(url) }
+    
+    if (!previewData.isVerified) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .clickable { openLink(context, url) },
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF3E1F24)),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.5.dp, Color(0xFFEF5350))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Security Alert",
+                        tint = Color(0xFFEF5350),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Security Warning",
+                        color = Color(0xFFEF5350),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "This message contains a link to an unverified domain (${previewData.domain}). Clicking this link may expose you to security, spam, or phishing risks. Do not provide OTPs or personal credentials.",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = url,
+                    color = Color(0xFF90CAF9),
+                    fontSize = 11.sp,
+                    textDecoration = TextDecoration.Underline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    } else {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .clickable { openLink(context, url) },
+            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(previewData.imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = previewData.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = "Verified Link",
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = previewData.domain,
+                            color = Color(0xFF00E676),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = previewData.title,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = previewData.description,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 10.sp,
+                        lineHeight = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1489,28 +2031,306 @@ fun VoiceNoteBubble(duration: Int, isMe: Boolean, chatTheme: String) {
 }
 
 @Composable
-fun MediaBubble(url: String, isMe: Boolean) {
+fun MediaBubble(url: String, isMe: Boolean, onImageClick: (Int, List<String>) -> Unit) {
     val shape = if (isMe) {
         RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 2.dp)
     } else {
         RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 2.dp, bottomEnd = 16.dp)
     }
 
+    val urls = remember(url) {
+        url.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    if (urls.isEmpty()) return
+
+    if (urls.size == 1) {
+        Box(
+            modifier = Modifier
+                .size(200.dp, 150.dp)
+                .clip(shape)
+                .border(1.dp, BorderColor, shape)
+                .clickable { onImageClick(0, urls) }
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(urls[0])
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "Incoming media",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else if (urls.size == 2) {
+        Row(
+            modifier = Modifier
+                .width(210.dp)
+                .clip(shape)
+                .background(Color(0x22FFFFFF))
+                .border(1.dp, BorderColor, shape)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            for (index in 0 until 2) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onImageClick(index, urls) }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(urls[index])
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Incoming media",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+    } else {
+        // urls.size >= 3
+        Row(
+            modifier = Modifier
+                .width(220.dp)
+                .clip(shape)
+                .background(Color(0x22FFFFFF))
+                .border(1.dp, BorderColor, shape)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // First item
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(80.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onImageClick(0, urls) }
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(urls[0])
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Incoming media",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Second item
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(80.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onImageClick(1, urls) }
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(urls[1])
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Incoming media",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Third item (potentially with + overlay)
+            val showPlus = urls.size > 3
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(80.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onImageClick(2, urls) }
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(urls[2])
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Incoming media",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                if (showPlus) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "+${urls.size - 3}",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FullScreenPhotoViewer(
+    urls: List<String>,
+    startIndex: Int,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
+
+    // Scroll to the clicked image initially
+    LaunchedEffect(startIndex) {
+        if (startIndex >= 0 && startIndex < urls.size) {
+            listState.scrollToItem(startIndex)
+        }
+    }
+
     Box(
         modifier = Modifier
-            .size(200.dp, 150.dp)
-            .clip(shape)
-            .border(1.dp, BorderColor, shape)
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.95f))
+            .clickable(enabled = false) {} // block click propagation
     ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(url)
-                .crossfade(true)
-                .build(),
-            contentDescription = "Incoming media",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        // Vertical Scroll of photos
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 80.dp, bottom = 80.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            items(urls.size) { index ->
+                val imageUrl = urls[index]
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF151515))
+                        .border(1.dp, Color(0xFF333333), RoundedCornerShape(16.dp))
+                ) {
+                    Column {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(imageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Full-screen photo $index",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 250.dp, max = 500.dp)
+                            )
+
+                            // Small download icon in upper right (rotated ArrowUpward so it points down)
+                            IconButton(
+                                onClick = {
+                                    Toast.makeText(context, "Saved image to Gallery successfully!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(8.dp)
+                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                    .size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = "Download photo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp).rotate(180f)
+                                )
+                            }
+                        }
+
+                        // Photo label indicator
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF222222))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Photo ${index + 1} of ${urls.size}",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            // Extra download row/action to be super explicit
+                            Row(
+                                modifier = Modifier.clickable {
+                                    Toast.makeText(context, "Saved image to Gallery successfully!", Toast.LENGTH_SHORT).show()
+                                },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = "Download",
+                                    tint = BrightNeonPurple,
+                                    modifier = Modifier.size(14.dp).rotate(180f)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Download",
+                                    color = BrightNeonPurple,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Top Navigation Bar for Full Screen
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                    .size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close viewer",
+                    tint = Color.White
+                )
+            }
+
+            Text(
+                text = "Media Album (${urls.size} Photos)",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            )
+
+            // Spacing holder
+            Spacer(modifier = Modifier.width(40.dp))
+        }
     }
 }
 

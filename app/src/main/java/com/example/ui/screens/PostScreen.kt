@@ -1131,12 +1131,18 @@ fun PostScreen(viewModel: VioraViewModel) {
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                         } else if (post.imageUrls.isNotEmpty()) {
-                            Box(modifier = Modifier.size(54.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(LocalContext.current).data(post.imageUrls.first()).crossfade(true).build(),
                                     contentDescription = "",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp))
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
                                 )
                                 if (post.imageUrls.size > 1) {
                                     Box(

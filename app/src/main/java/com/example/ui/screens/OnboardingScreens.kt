@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -110,15 +111,15 @@ fun WelcomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Favorite,
-                        contentDescription = "Viora",
-                        tint = AccentCrimsonPink,
+                    Image(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.img_purple_flame),
+                        contentDescription = "Viora Flame Logo",
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .purpleGlow()
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "Viora",
                         color = Color.White,
@@ -171,20 +172,21 @@ fun WelcomeScreen(
                     modifier = Modifier.padding(bottom = 20.dp)
                 )
 
-                // Large envelope visual symbol
+                // Large flame branding visual symbol
                 Box(
                     modifier = Modifier
-                        .size(64.dp)
+                        .size(90.dp)
                         .clip(CircleShape)
                         .background(Color(0x33B01DFF))
-                        .border(1.dp, Color(0xFFB01DFF), CircleShape),
+                        .border(1.5.dp, Color(0xFFB01DFF), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = "Email sign up badge",
-                        tint = BrightNeonPurple,
-                        modifier = Modifier.size(28.dp)
+                    Image(
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.img_purple_flame),
+                        contentDescription = "Brand Flame Badge",
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
                     )
                 }
 
